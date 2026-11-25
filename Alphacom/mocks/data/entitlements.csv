@@ -1,0 +1,10 @@
+account_id,name,support_tier,contract_end,arr_usd
+ACC-007,Northwind Health,Platinum,2027-01-15,1250000
+ACC-77,Acme Corp,Platinum,2027-01-15,480000
+ACC-012,Kestrel Freight,Platinum,2027-09-30,910000
+ACC-019,Orchard Credit Union,Gold,2027-01-05,220000
+ACC-023,Halden Biotech,Platinum,2026-12-20,640000
+ACC-031,Ridgeway Manufacturing,Silver,2027-02-01,95000
+ACC-044,Brightline Dental Group,Platinum,2027-02-10,730000
+ACC-052,Mosaic Media,Standard,2027-06-01,40000
+ACC-060,Pinecrest Schools,Gold,2027-03-15,150000

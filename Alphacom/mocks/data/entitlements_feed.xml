@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Change feed from the entitlement system. Newer than the nightly CSV export. -->
+<accounts generatedAt="2026-11-25T06:00:00Z">
+  <account id="ACC-007">
+    <tier>Platinum</tier>
+    <renewal>2027-01-15</renewal>
+  </account>
+  <!-- Halden renewed early: the CSV still shows the old contract end. -->
+  <account id="ACC-023">
+    <tier>Platinum</tier>
+    <renewal>2027-12-20</renewal>
+  </account>
+  <account id="ACC-031">
+    <tier>Gold</tier>
+    <renewal>2027-02-01</renewal>
+  </account>
+</accounts>

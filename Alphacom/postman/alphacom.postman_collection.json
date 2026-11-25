@@ -1,0 +1,1078 @@
+{
+  "info": {
+    "name": "Alphacom Platform API",
+    "description": "Functional and regression checks. Run in order (Setup first):\nnpx newman run postman/alphacom.postman_collection.json -e postman/local.postman_environment.json",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Setup",
+      "description": "",
+      "item": [
+        {
+          "name": "Reset mock upstreams",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{mocksUrl}}/__reset"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token: support engineer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/dev/token",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sub\": \"alice\",\n  \"scopes\": [\n    \"customers:read\",\n    \"cases:read\",\n    \"cases:write\",\n    \"cases:escalate\"\n  ],\n  \"client_id\": \"postman\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.environment.set(\"supportToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token: finance analyst",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/dev/token",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sub\": \"fiona\",\n  \"scopes\": [\n    \"customers:read\",\n    \"customers:financials\",\n    \"cases:read\"\n  ],\n  \"client_id\": \"postman\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.environment.set(\"financeToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token: read-only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/dev/token",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sub\": \"rory\",\n  \"scopes\": [\n    \"cases:read\"\n  ],\n  \"client_id\": \"postman\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.environment.set(\"readonlyToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Customers",
+      "description": "",
+      "item": [
+        {
+          "name": "Aggregate view hides ARR without finance scope",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/customers/ACC-007"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"entitlement + usage + open cases\", () => { pm.expect(b.supportTier).to.eql(\"Platinum\"); pm.expect(b.usage).to.have.property(\"latestMonth\"); pm.expect(b.openCases).to.have.property(\"total\"); });",
+                  "pm.test(\"ARR omitted and listed as redacted\", () => { pm.expect(b).to.not.have.property(\"arrUsd\"); pm.expect(b.redactedFields).to.include(\"arrUsd\"); });",
+                  "pm.test(\"rate limit headers\", () => pm.expect(pm.response.headers.has(\"RateLimit-Remaining\")).to.be.true);",
+                  "pm.test(\"correlation id echoed\", () => pm.expect(pm.response.headers.get(\"X-Correlation-ID\")).to.be.ok);",
+                  "pm.environment.set(\"customerEtag\", pm.response.headers.get(\"ETag\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Finance scope sees ARR",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{financeToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/customers/ACC-007"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"arrUsd present\", () => pm.expect(pm.response.json().arrUsd).to.eql(1250000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unpadded id is canonicalised (ACC-77 -> ACC-077)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/customers/ACC-77"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"canonical id\", () => pm.expect(pm.response.json().id).to.eql(\"ACC-077\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "If-None-Match returns 304",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              },
+              {
+                "key": "If-None-Match",
+                "value": "{{customerEtag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/customers/ACC-007"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 304\", () => pm.response.to.have.status(304));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown customer is 404 problem",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/customers/ACC-999"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"problem+json\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Malformed id is 400 with field error",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/customers/CUST-1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"problem+json\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"));",
+                  "pm.test(\"field named\", () => pm.expect(pm.response.json().errors[0].field).to.eql(\"customerId\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Resilience",
+      "description": "Uses the mock fault-injection endpoint. Failures are on optional sources so circuits are left closed for later folders.",
+      "item": [
+        {
+          "name": "Inject: usage warehouse down",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{mocksUrl}}/__faults",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"system\": \"warehouse\",\n  \"mode\": \"error\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Customer still returned, degraded",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/customers/ACC-044"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"degraded flag\", () => { pm.expect(b.degraded).to.be.true; pm.expect(b.degradedSources).to.include(\"warehouse\"); pm.expect(b.usage).to.be.null; });",
+                  "pm.test(\"entitlement still present\", () => pm.expect(b.supportTier).to.eql(\"Platinum\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inject: entitlement system down",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{mocksUrl}}/__faults",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"system\": \"entitlement\",\n  \"mode\": \"error\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Still served from cache, flagged stale",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/customers/ACC-007"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"served (cache)\", () => pm.expect(pm.response.json().supportTier).to.eql(\"Platinum\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Clear faults",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{mocksUrl}}/__reset"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Cases",
+      "description": "",
+      "item": [
+        {
+          "name": "Sample question: Platinum P1 > 48h, renewal < 90d",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases?priority=P1&status=open,in_progress,pending_customer,escalated&customerTier=Platinum&openedBefore={{openedBefore}}&renewalBefore={{renewalBefore}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const before = new Date(Date.now() - 48*3600*1000).toISOString().replace(/\\.\\d{3}Z$/, \"Z\");",
+                  "const renew = new Date(Date.now() + 90*86400*1000).toISOString().slice(0, 10);",
+                  "pm.environment.set(\"openedBefore\", before); pm.environment.set(\"renewalBefore\", renew);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"exactly the three matching cases\", () => pm.expect(pm.response.json().data.map(c => c.id).sort()).to.eql([\"CS-10231\",\"CS-10240\",\"CS-10251\"]));",
+                  "pm.test(\"each case carries its customer block\", () => pm.response.json().data.forEach(c => pm.expect(c.customer.supportTier).to.eql(\"Platinum\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Page 1 (limit 5)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases?limit=5&sort=priority"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"5 rows and a cursor\", () => { pm.expect(b.data.length).to.eql(5); pm.expect(b.page.nextCursor).to.be.a(\"string\"); });",
+                  "pm.environment.set(\"cursor\", b.page.nextCursor); pm.environment.set(\"page1\", JSON.stringify(b.data.map(c => c.id)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Page 2 follows the cursor without overlap",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases?limit=5&sort=priority&cursor={{cursor}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const p1 = JSON.parse(pm.environment.get(\"page1\"));",
+                  "pm.test(\"no overlap\", () => pm.response.json().data.forEach(c => pm.expect(p1).to.not.include(c.id)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cursor reused with other filters is 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases?limit=5&sort=-openedAt&cursor={{cursor}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"problem+json\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"));",
+                  "pm.test(\"invalid-cursor\", () => pm.expect(pm.response.json().type).to.include(\"invalid-cursor\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid enum filter is 400 with field errors",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases?priority=P9"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"problem+json\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"));",
+                  "pm.test(\"priority flagged\", () => pm.expect(pm.response.json().errors.map(e => e.field)).to.include(\"priority\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deprecated ?account= still works, with Deprecation headers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases?account=ACC-007"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Deprecation + Sunset\", () => { pm.expect(pm.response.headers.get(\"Deprecation\")).to.eql(\"true\"); pm.expect(pm.response.headers.has(\"Sunset\")).to.be.true; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "No token is 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/v1/cases"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"problem+json\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"));",
+                  "pm.test(\"WWW-Authenticate\", () => pm.expect(pm.response.headers.get(\"WWW-Authenticate\")).to.include(\"Bearer\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Comments (idempotent)",
+      "description": "",
+      "item": [
+        {
+          "name": "Create comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10231/comments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Engineering engaged, next update 17:00 UTC\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set(\"idemKey\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.environment.set(\"commentId\", pm.response.json().id);",
+                  "pm.test(\"author is the caller\", () => pm.expect(pm.response.json().author).to.eql(\"alice\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retry with same key replays, no duplicate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10231/comments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Engineering engaged, next update 17:00 UTC\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"same comment\", () => pm.expect(pm.response.json().id).to.eql(pm.environment.get(\"commentId\")));",
+                  "pm.test(\"Idempotent-Replayed\", () => pm.expect(pm.response.headers.get(\"Idempotent-Replayed\")).to.eql(\"true\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same key, different body is 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idemKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10231/comments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"something else\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"problem+json\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Missing Idempotency-Key is 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10231/comments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"x\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"problem+json\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read-only token is 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{readonlyToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10231/comments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"x\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"problem+json\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Escalation",
+      "description": "",
+      "item": [
+        {
+          "name": "Read case to get ETag",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10251"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.environment.set(\"caseEtag\", pm.response.headers.get(\"ETag\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Without If-Match is 428",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10251/escalate",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"customer_impact\",\n  \"note\": \"Immutable snapshots missing for 4 days\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 428\", () => pm.response.to.have.status(428));",
+                  "pm.test(\"problem+json\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stale If-Match is 412",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              },
+              {
+                "key": "If-Match",
+                "value": "\"stale\""
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10251/escalate",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"customer_impact\",\n  \"note\": \"Immutable snapshots missing for 4 days\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 412\", () => pm.response.to.have.status(412));",
+                  "pm.test(\"problem+json\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Escalate with current ETag",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{caseEtag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10251/escalate",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"customer_impact\",\n  \"note\": \"Immutable snapshots missing for 4 days\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"escalated\", () => pm.expect(pm.response.json().status).to.eql(\"escalated\"));",
+                  "pm.environment.set(\"caseEtag\", pm.response.headers.get(\"ETag\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Escalating again is 409 already-escalated",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{caseEtag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10251/escalate",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"customer_impact\",\n  \"note\": \"Immutable snapshots missing for 4 days\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"already-escalated\", () => pm.expect(pm.response.json().type).to.include(\"already-escalated\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read P4 case (Standard tier)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10278"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.environment.set(\"p4Etag\", pm.response.headers.get(\"ETag\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "P4 for Standard customer is 422 business rule",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{supportToken}}"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{p4Etag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/v1/cases/CS-10278/escalate",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"executive_request\",\n  \"note\": \"Customer exec asked for a call\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"escalation-not-allowed\", () => pm.expect(pm.response.json().type).to.include(\"escalation-not-allowed\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Webhook receiver got case.escalated (signed)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{receiverUrl}}/events"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 2500);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"event for CS-10251 delivered and verified\", () => pm.expect(pm.response.json().some(e => e.type === \"case.escalated\" && e.data.caseId === \"CS-10251\")).to.be.true);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
